@@ -9,13 +9,17 @@
 api/                FastAPI + 有界 Myers（无第三方差分库）
   app/myers.py      算法：d 递增、k 递增扩展最远 x；同 x 选删除前驱；同规则回溯
   app/main.py       POST /diff（普通 JSON 整数数组）、422 错误码
-  tests/            pytest：最短性（LCS 对拍）、删除优先裁决、422 裁决
+  tests/            pytest：最短性（LCS 对拍）、删除优先裁决、422 裁决、分块场景重放
   verify/acceptance.py  compose 的 verify 一次性验收服务入口
 web/                React 前端
   src/components/ResultView.tsx        距离 + 每项零基源/目标下标
+  src/components/BlockReview.tsx       逐块采纳 + 可交付混合序列 + 剩余轨迹
+  src/hybrid.ts       纯函数：连续非 keep 步骤分块、按原始 source 坐标一次性重放
   src/components/NumberListEditor.tsx  可增删的整数编号输入
   src/components/ResultView.test.tsx   Vitest 结果视图测试
+  src/hybrid.test.ts                  Vitest 分块/重放/乱序裁决纯函数测试
   e2e/spec.spec.ts    Playwright：真实输入贯通与失败提示
+  e2e/blocks.spec.ts  Playwright：纯插入/纯删除/相邻改写/重复镜头、撤销、乱序响应
 docker-compose.yml  api / web / verify 三服务
 ```
 
@@ -69,6 +73,31 @@ docker compose run --rm verify
 | --------------- | ------------------------------------------------------------ |
 | `INVALID_INPUT` | 非整数、越界（<0 或 >2147483647）、数组超过 20000 项、结构错误 |
 | `DIFF_LIMIT`    | 只搜索至编辑距离 d=800 仍未到达终点                          |
+
+## 逐块采纳与可交付混合序列
+
+得到原始对齐后，界面把其中**连续的非 keep 步骤**归为不可拆分差异块：
+
+- 删除与**同一边界**的插入属于同一块（如平局裁决产生的相邻 insert+delete）；
+- 块编号按其在原始对齐中首次出现的顺序确定，源/目标跨度直接取块内零基下标
+  （删除段 `[sourceStart, sourceEnd)`、插入段 `[targetStart, targetEnd)`，不适用侧为 `null`），
+  因而编号与跨度**不随选择变化**。
+
+混合镜头序列始终**以原始 source 坐标一次性重放**构造（`src/hybrid.ts`）：
+只按原始对齐顺序扫描一次，keep 恒产出；非 keep 行按所属块是否采纳决定
+（采纳：删除不产出、插入按目标下标取值；不采纳：删除的源项保留、插入跳过）。
+不存在“先应用一块再重排下标”，因此：
+
+- 一块都不选 => 精确等于 **source**；
+- 全部采纳   => 精确等于 **target**；
+- 任意子集   => 各块独立、互不漂移。
+
+选择变化后用**现有 `/diff` 接口**计算「混合序列 → 原始 target」的剩余轨迹，
+它只展示尚未采纳的步数，**绝不覆盖原始对齐**。前端以单调递增令牌
+（`RequestGate`）裁决：快速改选时，迟到的旧选择响应即使晚到也会被丢弃，
+不能覆盖新选择。修改任一原始输入或原始差分失败时，立即撤销旧块选择、
+剩余轨迹与可下载混合序列（产物清空、下载禁用）。原 `/diff` 接口与删除优先
+裁决保持不变。
 
 ## 算法约束（自行实现，无逐格矩阵）
 

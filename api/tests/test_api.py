@@ -112,3 +112,36 @@ def test_20000_items_small_diff_runs_without_matrix_blowup():
     assert resp.status_code == 200
     data = resp.json()
     assert data["distance"] == 2
+
+
+def replay_via_api(a, b):
+    """走真实 /diff，并在客户端复算服务端重放自检（保留/插入产出、删除不产出）。"""
+    resp = client.post("/diff", json={"source": a, "target": b})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    out = [
+        a[r["source"]] if r["type"] == "keep" else b[r["target"]]
+        for r in data["alignment"]
+        if r["type"] != "delete"
+    ]
+    assert out == b
+    return data
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ([1, 4], [1, 2, 3, 4]),            # 纯插入
+        ([10, 20, 30, 40], [10, 40]),      # 纯删除
+        ([1, 2, 3, 4, 5], [1, 9, 3, 8, 5]),  # 相邻改写
+        ([1, 2, 2, 1], [1, 2, 1]),         # 重复镜头
+        ([7, 7, 7], [7, 7]),               # 重复镜头（全同名）
+    ],
+)
+def test_alignment_replay_equals_target(a, b):
+    # 服务端内部已做 replay 自检（失败会返回 500 ALIGNMENT_REPLAY_FAILED）；
+    # 这里对四类场景再次独立复核混合分块前的原始轨迹重放。
+    data = replay_via_api(a, b)
+    ops = [r["type"] for r in data["alignment"]]
+    assert ops.count("keep") + ops.count("delete") == len(a)
+    assert ops.count("keep") + ops.count("insert") == len(b)

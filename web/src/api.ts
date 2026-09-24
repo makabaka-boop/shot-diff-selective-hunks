@@ -42,13 +42,26 @@ export async function postDiff(
   sourceRows: string[],
   targetRows: string[]
 ): Promise<DiffResult> {
+  return callDiff(toJsonValues(sourceRows), toJsonValues(targetRows));
+}
+
+/**
+ * 选取差异块后，用现有 /diff 接口计算「混合序列 -> 原始 target」的剩余轨迹。
+ * target 是最近一次成功差分的原始目标序列（由对齐还原），不重新解析输入框，
+ * 因此该调用只用于展示还剩多少改动未采纳，绝不覆盖原始对齐结果。
+ */
+export async function postRemainingDiff(
+  hybrid: number[],
+  target: number[]
+): Promise<DiffResult> {
+  return callDiff(hybrid, target);
+}
+
+async function callDiff(source: unknown[], target: unknown[]): Promise<DiffResult> {
   const res = await fetch("/api/diff", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      source: toJsonValues(sourceRows),
-      target: toJsonValues(targetRows),
-    }),
+    body: JSON.stringify({ source, target }),
   });
 
   if (!res.ok) {

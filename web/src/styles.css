@@ -176,3 +176,85 @@ td {
 .op-insert td:first-child + td {
   color: #1d4ed8;
 }
+
+.review {
+  background: #fff;
+  border: 1px solid #dfe3ea;
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 18px;
+}
+
+.review h2 {
+  font-size: 17px;
+  margin-top: 0;
+}
+
+.review-actions {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+
+.review-actions button,
+.review button[data-testid="download-hybrid"] {
+  padding: 6px 14px;
+  border: 1px solid #cdd3dc;
+  background: #f7f8fa;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.blocks {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.block {
+  padding: 8px 10px;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.block label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.sequence {
+  font-variant-numeric: tabular-nums;
+  background: #f7f8fa;
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-height: 18px;
+}
+
+.remaining-rows {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.remaining-rows .op-keep {
+  color: #166534;
+}
+.remaining-rows .op-delete {
+  color: #b91c1c;
+}
+.remaining-rows .op-insert {
+  color: #1d4ed8;
+}
+
+.warn {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 10px 12px;
+}

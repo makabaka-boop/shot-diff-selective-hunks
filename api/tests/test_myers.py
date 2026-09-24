@@ -123,3 +123,53 @@ def test_large_arrays_small_distance():
     b = [v for v in a if v not in (123, 4567, 19999)]
     b.insert(10, 2_147_483_647)
     run_and_check(a, b)
+
+
+def replay_script(a, b):
+    """跑最短对齐并显式断言：保留/插入按序产出、删除不产出 == 目标序列。"""
+    d, rows = run_and_check(a, b)
+    assert replay(a, b, rows) == list(b)
+    return d, rows
+
+
+def test_replay_pure_insert():
+    # 纯插入：只新增镜头、无删除。
+    a, b = [1, 4], [1, 2, 3, 4]
+    d, rows = replay_script(a, b)
+    assert d == 2
+    assert all(op != "delete" for op, _, _ in rows)
+
+
+def test_replay_pure_delete():
+    # 纯删除：只移除镜头、无插入。
+    a, b = [10, 20, 30, 40], [10, 40]
+    d, rows = replay_script(a, b)
+    assert d == 2
+    assert all(op != "insert" for op, _, _ in rows)
+
+
+def test_replay_adjacent_rewrites():
+    # 相邻两处改写（中间隔着 keep）：两块各自删除+插入，整体重放仍精确等于目标。
+    a, b = [1, 2, 3, 4, 5], [1, 9, 3, 8, 5]
+    d, rows = replay_script(a, b)
+    assert d == 4
+    # 两处改写之间至少有一个 keep，因此它们被拆成两个非空非 keep 段。
+    runs, cur = [], 0
+    for op, _, _ in rows:
+        if op == "keep":
+            if cur:
+                runs.append(cur)
+            cur = 0
+        else:
+            cur += 1
+    if cur:
+        runs.append(cur)
+    assert len(runs) == 2
+
+
+def test_replay_repeated_shots():
+    # 重复镜头：删除重复项时按零基源下标定位，重放不得错取同名镜头。
+    a, b = [1, 2, 2, 1], [1, 2, 1]
+    replay_script(a, b)
+    a, b = [7, 7, 7], [7, 7]
+    replay_script(a, b)
