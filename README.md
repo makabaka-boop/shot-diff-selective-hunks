@@ -8,14 +8,17 @@
 ```
 api/                FastAPI + 有界 Myers（无第三方差分库）
   app/myers.py      算法：d 递增、k 递增扩展最远 x；同 x 选删除前驱；同规则回溯
-  app/main.py       POST /diff（普通 JSON 整数数组）、422 错误码
-  tests/            pytest：最短性（LCS 对拍）、删除优先裁决、422 裁决
+  app/blocks.py     连续非 keep 行 → 不可拆分差异块；按原始坐标一次性混合重放
+  app/main.py       POST /diff（普通 JSON 整数数组）、422 错误码、重放/混合自检
+  tests/            pytest：最短性（LCS 对拍）、删除优先、分块混合、422 裁决
   verify/acceptance.py  compose 的 verify 一次性验收服务入口
 web/                React 前端
+  src/blocks.ts                 分块与混合重放纯函数（块编号/跨度稳定）
+  src/components/BlockMixer.tsx 逐块批准、可下载混合序列、剩余轨迹
   src/components/ResultView.tsx        距离 + 每项零基源/目标下标
-  src/components/NumberListEditor.tsx  可增删的整数编号输入
+  src/components/NumberListEditor.tsx  可增删/多行粘贴的整数编号输入
   src/components/ResultView.test.tsx   Vitest 结果视图测试
-  e2e/spec.spec.ts    Playwright：真实输入贯通与失败提示
+  e2e/spec.spec.ts    Playwright：真实输入、差异块（纯插入/删除/相邻改写/重复镜头）、乱序响应
 docker-compose.yml  api / web / verify 三服务
 ```
 
@@ -85,6 +88,28 @@ docker compose run --rm verify
 
 因此两组各 20000 项、距离很小的长片改动也只需极小内存；最坏（距离约 800）在
 普通机器上也是亚秒级返回或 `DIFF_LIMIT`。
+
+## 差异块与逐块批准
+
+剪辑助理通常只批准重剪轨迹中的几处改动。界面把**现有最短对齐中连续的非 keep
+步骤**归为一个不可拆分差异块（`web/src/blocks.ts` 与 `api/app/blocks.py` 同规则）：
+
+- 删除与**同一边界**的插入属于同一块（Myers 删除优先裁决下，相邻改写即
+  insert 紧接 delete）；被 keep 行分隔的改动是不同块。
+- 块编号按对齐顺序从 0 递增；源、目标跨度以**两侧零基边界**确定（半开区间
+  `[start,end)`）：纯删除块目标跨度为空 `[t,t)`，纯插入块源跨度为空 `[s,s)`。
+- 混合镜头序列**始终以原始 source 坐标一次性重放**整块对齐：keep 恒产出；
+  已批准块采纳插入、放弃删除；未批准块保留删除、忽略插入。选择集合只是行级
+  谓词，与勾选先后无关，**不会因先应用一块而漂移后续下标**。
+  - 一块不选 ⇒ 混合序列精确等于 source；全部选中 ⇒ 精确等于 target。
+- 选择变化后复用现有 `POST /diff` 计算「混合序列 → target」的剩余轨迹；它只在
+  独立面板展示，**不覆盖原始对齐**。前端以请求序号丢弃迟到响应：旧选择的慢
+  响应即使晚到也不能覆盖新选择的剩余距离。
+- 修改任一原始输入、或原始差分请求失败时：旧块选择、剩余轨迹与可下载混合
+  序列（`mixed-shots.txt`，每行一个镜头编号）一并撤销；原始 `/diff` 接口、
+  422 裁决与删除优先裁决均不变。
+- `/diff` 服务端自检除原有「重放=target」外，另断言分块重放不选=source、
+  全选=target，失败返回 500。
 
 ## 本地开发与测试
 

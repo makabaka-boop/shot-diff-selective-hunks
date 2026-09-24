@@ -32,6 +32,16 @@ export function NumberListEditor({ title, testId, rows, onChange }: Props) {
 
   const clear = () => onChange([""]);
 
+  // 多行粘贴：按换行/逗号拆成多行，从当前行开始铺入，避免逐条点击“增加”。
+  const pasteMulti = (i: number, text: string) => {
+    const parts = text.split(/[\n,]+/).map((s) => s.trim()).filter((s) => s !== "");
+    if (parts.length <= 1) return false;
+    const copy = rows.slice();
+    copy.splice(i, 1, ...parts, "");
+    onChange(copy);
+    return true;
+  };
+
   return (
     <section className="editor" data-testid={testId}>
       <header className="editor-head">
@@ -55,6 +65,10 @@ export function NumberListEditor({ title, testId, rows, onChange }: Props) {
               value={value}
               placeholder="整数镜头编号，如 1024"
               onChange={(e) => update(i, e.target.value)}
+              onPaste={(e) => {
+                const text = e.clipboardData.getData("text");
+                if (pasteMulti(i, text)) e.preventDefault();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();

@@ -42,12 +42,23 @@ export async function postDiff(
   sourceRows: string[],
   targetRows: string[]
 ): Promise<DiffResult> {
+  return postDiffValues(toJsonValues(sourceRows), toJsonValues(targetRows));
+}
+
+/**
+ * 以已经确定的整数序列调用现有 /diff（例如混合镜头序列 → target 的剩余轨迹）。
+ * 不引入新接口、不改变裁决；值必须为整数（混合序列只由对齐中的编号产出）。
+ */
+export async function postDiffValues(
+  sourceValues: readonly unknown[],
+  targetValues: readonly unknown[]
+): Promise<DiffResult> {
   const res = await fetch("/api/diff", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      source: toJsonValues(sourceRows),
-      target: toJsonValues(targetRows),
+      source: sourceValues,
+      target: targetValues,
     }),
   });
 

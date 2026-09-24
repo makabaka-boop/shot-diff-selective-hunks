@@ -1,6 +1,13 @@
-import { expect as pwExpect, test, type Page, type Locator } from "@playwright/test";
+import { expect as pwExpect, test, type Page, type Locator, type Download } from "@playwright/test";
 
 const expect = pwExpect;
+
+async function streamText(download: Download): Promise<string> {
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 function section(page: Page, testId: string): Locator {
   return page.getByTestId(testId);
@@ -11,6 +18,16 @@ async function fillList(page: Page, testId: string, values: (string | number)[])
   const sec = await section(page, testId);
   const addBtn = sec.getByRole("button", { name: "＋ 增加一项" });
   const inputs = sec.locator("input");
+  if (values.length > 50) {
+    // 超长序列走真实粘贴事件（编辑器按换行拆行），避免数百次点击。
+    await inputs.first().click();
+    await inputs.first().evaluate((el, text) => {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", text);
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    }, values.map(String).join("\n"));
+    return;
+  }
   while ((await inputs.count()) < values.length) {
     await addBtn.click();
   }
@@ -138,5 +155,184 @@ test.describe("失败提示来自真实后端", () => {
     const banner = page.getByTestId("error-banner");
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(banner).toContainText("DIFF_LIMIT");
+  });
+});
+
+test.describe("差异块批准与混合镜头序列", () => {
+  async function compute(page: Page, source: (string | number)[], target: (string | number)[]) {
+    await fillList(page, "source-editor", source);
+    await fillList(page, "target-editor", target);
+    await page.getByTestId("compare").click();
+    await expect(page.getByTestId("block-mixer")).toBeVisible();
+  }
+
+  async function mixedText(page: Page): Promise<string> {
+    return (await page.getByTestId("mixed-sequence").textContent()) ?? "";
+  }
+
+  async function remainingDistance(page: Page): Promise<string | null> {
+    const el = page.getByTestId("remaining-distance");
+    await expect(el).toBeVisible();
+    return el.textContent();
+  }
+
+  test("纯插入：单块，不选=source，勾选=target，剩余距离归零", async ({ page }) => {
+    await compute(page, [1, 2], [1, 9, 8, 2]);
+
+    const blocks = page.getByTestId("diff-block");
+    await expect(blocks).toHaveCount(1);
+    await expect(blocks).toContainText("插入");
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 2");
+
+    await page.getByTestId("block-checkbox").check();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 9, 8, 2");
+    await expect(page.getByTestId("mixed-is-target")).toBeVisible();
+    expect(await remainingDistance(page)).toBe("0");
+
+    // 撤销勾选：精确回到 source。
+    await page.getByTestId("block-checkbox").uncheck();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 2");
+    await expect(page.getByTestId("mixed-is-source")).toBeVisible();
+    expect(await remainingDistance(page)).toBe("2");
+  });
+
+  test("可交付混合序列可下载；stale 后下载被撤销", async ({ page }) => {
+    await compute(page, [1, 2, 3], [1, 4, 3]);
+    await page.getByTestId("block-checkbox").check();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 4, 3");
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("download-mixed").click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("mixed-shots.txt");
+    expect(await streamText(download)).toBe("1\n4\n3\n");
+
+    // 改动原始输入后：下载按钮禁用，旧混合序列撤销。
+    await page.getByTestId("source-editor").getByRole("button", { name: "＋ 增加一项" }).click();
+    await page.getByTestId("source-editor").locator("input").last().fill("99");
+    await expect(page.getByTestId("download-mixed")).toBeDisabled();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("");
+  });
+
+  test("纯删除：单块，勾选后删除项离开混合序列", async ({ page }) => {
+    await compute(page, [1, 7, 8, 2], [1, 2]);
+
+    await expect(page.getByTestId("diff-block")).toHaveCount(1);
+    await expect(page.getByTestId("diff-block")).toContainText("删除");
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 7, 8, 2");
+
+    await page.getByTestId("block-checkbox").check();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 2");
+    expect(await remainingDistance(page)).toBe("0");
+  });
+
+  test("相邻改写：插入与删除同属不可拆分块，逐块选择无下标漂移", async ({ page }) => {
+    await compute(page, [1, 2, 3, 4, 5], [1, 8, 3, 9, 5]);
+
+    const blocks = page.getByTestId("diff-block");
+    await expect(blocks).toHaveCount(2);
+    await expect(blocks.nth(0)).toContainText("源 [1, 2)");
+    await expect(blocks.nth(0)).toContainText("目标 [1, 2)");
+    await expect(blocks.nth(1)).toContainText("源 [3, 4)");
+    await expect(blocks.nth(1)).toContainText("目标 [3, 4)");
+
+    const checkboxes = page.getByTestId("block-checkbox");
+    await checkboxes.nth(0).check();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 8, 3, 4, 5");
+    expect(await remainingDistance(page)).toBe("2");
+
+    // 无论先应用哪一块，结果都由原始 source 坐标一次性重放。
+    await checkboxes.nth(1).check();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 8, 3, 9, 5");
+    expect(await remainingDistance(page)).toBe("0");
+
+    await checkboxes.nth(0).uncheck();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 2, 3, 9, 5");
+    expect(await remainingDistance(page)).toBe("2");
+  });
+
+  test("重复镜头：块编号/跨度稳定，枚举勾选均得到合法混合序列", async ({ page }) => {
+    await compute(page, [5, 5, 1, 5, 5, 2, 5], [5, 1, 1, 5, 2, 2, 9]);
+
+    const blocks = page.getByTestId("diff-block");
+    await expect(blocks).toHaveCount(4);
+    // 初始：精确等于 source。
+    expect(await mixedText(page)).toBe("5, 5, 1, 5, 5, 2, 5");
+
+    const checkboxes = page.getByTestId("block-checkbox");
+    // 只采纳纯插入块（块 1：目标下标 2 的 1）。
+    await checkboxes.nth(1).check();
+    expect(await mixedText(page)).toBe("5, 5, 1, 1, 5, 5, 2, 5");
+    expect(await remainingDistance(page)).toBe("5");
+
+    // 全部采纳：精确等于 target。
+    await page.getByTestId("accept-all").click();
+    expect(await mixedText(page)).toBe("5, 1, 1, 5, 2, 2, 9");
+    expect(await remainingDistance(page)).toBe("0");
+
+    // 全部撤销：精确回到 source。
+    await page.getByTestId("accept-none").click();
+    expect(await mixedText(page)).toBe("5, 5, 1, 5, 5, 2, 5");
+  });
+
+  test("改动任一原始输入：撤销块选择与可下载混合序列，原始对齐仍保留", async ({ page }) => {
+    await compute(page, [1, 2, 3], [1, 4, 3]);
+    await page.getByTestId("block-checkbox").check();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("1, 4, 3");
+
+    // 在源序列追加一项（原始输入被改动）。
+    await page.getByTestId("source-editor").getByRole("button", { name: "＋ 增加一项" }).click();
+    await page.getByTestId("source-editor").locator("input").last().fill("99");
+
+    await expect(page.getByTestId("mixer-stale")).toBeVisible();
+    await expect(page.getByTestId("block-checkbox")).not.toBeChecked();
+    await expect(page.getByTestId("download-mixed")).toBeDisabled();
+    await expect(page.getByTestId("mixed-sequence")).toHaveText("");
+    await expect(page.getByTestId("remaining-stale")).toBeVisible();
+    // 原始对齐轨迹不被剩余轨迹或输入改动覆盖。
+    await expect(page.getByTestId("result-view")).toBeVisible();
+    expect(await page.getByTestId("alignment-row").count()).toBe(4);
+  });
+
+  test("乱序响应：迟到的剩余计算不覆盖新选择", async ({ page }) => {
+    // 块0（相邻改写，成本2）批准后剩余距离 1；块1（纯插入，成本1）后为 2。
+    await compute(page, [1, 2, 3, 4, 5, 6, 7], [1, 9, 3, 4, 5, 6, 8, 7]);
+    const checkboxes = page.getByTestId("block-checkbox");
+    await expect(checkboxes).toHaveCount(2);
+
+    // 拦截 /api/diff：把“只选块0”的剩余请求挂起，其余（含改选块1）立即放行。
+    // 路由注册于初次差分之后，故这里只会计数剩余轨迹请求。
+    let releaseSlow: () => void = () => {};
+    const slowBlocked = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    await page.route("**/api/diff", async (route) => {
+      const requestBody = route.request().postDataJSON() as { source: number[] };
+      // 选块 0 的旧选择：source 含 9 但不含 8。
+      if (requestBody.source.includes(9) && !requestBody.source.includes(8)) {
+        await slowBlocked;
+      }
+      await route.continue();
+    });
+
+    await checkboxes.nth(0).check(); // 触发挂起请求
+    await page.waitForTimeout(200);
+    await checkboxes.nth(0).uncheck();
+    await checkboxes.nth(1).check(); // 触发立即请求（新选择）
+    await expect(page.getByTestId("remaining-distance")).toHaveText("2", {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("mixed-sequence")).toHaveText(
+      "1, 2, 3, 4, 5, 6, 8, 7"
+    );
+
+    // 迟到响应放行：属于旧选择的距离 1 不得覆盖当前的 2。
+    releaseSlow();
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("remaining-distance")).toHaveText("2");
+    await expect(page.getByTestId("mixed-sequence")).toHaveText(
+      "1, 2, 3, 4, 5, 6, 8, 7"
+    );
   });
 });

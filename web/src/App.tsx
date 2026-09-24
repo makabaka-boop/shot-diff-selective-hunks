@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NumberListEditor } from "./components/NumberListEditor";
 import { ResultView } from "./components/ResultView";
 import { ErrorBanner } from "./components/ErrorBanner";
+import { BlockMixer } from "./components/BlockMixer";
 import { postDiff } from "./api";
 import type { ApiError, DiffResult } from "./types";
 
@@ -11,14 +12,29 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [result, setResult] = useState<DiffResult | null>(null);
+  // 原始输入在最近一次成功差分后被改动：撤销旧块选择与可下载混合序列。
+  const [inputsDirty, setInputsDirty] = useState(false);
+
+  const editSource = (rows: string[]) => {
+    setSource(rows);
+    setInputsDirty(true);
+  };
+
+  const editTarget = (rows: string[]) => {
+    setTarget(rows);
+    setInputsDirty(true);
+  };
 
   const submit = async () => {
     setLoading(true);
     setError(null);
     try {
-      setResult(await postDiff(source, target));
+      const next = await postDiff(source, target);
+      setResult(next);
+      setInputsDirty(false);
     } catch (e) {
       setError(e as ApiError);
+      // 原始差分失败：旧块选择与可下载混合序列一并撤销。
       setResult(null);
     } finally {
       setLoading(false);
@@ -34,8 +50,8 @@ export function App() {
       </p>
 
       <div className="editors">
-        <NumberListEditor title="源序列" testId="source-editor" rows={source} onChange={setSource} />
-        <NumberListEditor title="目标序列" testId="target-editor" rows={target} onChange={setTarget} />
+        <NumberListEditor title="源序列" testId="source-editor" rows={source} onChange={editSource} />
+        <NumberListEditor title="目标序列" testId="target-editor" rows={target} onChange={editTarget} />
       </div>
 
       <div className="actions">
@@ -46,6 +62,17 @@ export function App() {
 
       {error && <ErrorBanner error={error} />}
       {result && <ResultView result={result} />}
+      {result && <BlockMixer key={resultKey(result)} result={result} stale={inputsDirty} />}
     </main>
   );
+}
+
+/**
+ * 每次新的成功计算用对齐内容作 key：旧 BlockMixer 连同其块选择整体卸载，
+ * 保证新对齐下块编号、跨度与选择互不串扰。
+ */
+function resultKey(result: DiffResult): string {
+  return result.alignment
+    .map((row) => `${row.type}:${row.source ?? "x"}:${row.target ?? "x"}:${row.value}`)
+    .join("|");
 }

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from .blocks import mixed_replay, split_blocks
 from .myers import bounded_myers, replay
 
 MAX_ITEMS = 20_000
@@ -115,6 +116,15 @@ def diff(body: DiffRequest):
     # 服务端自检：轨迹重放必须精确得到目标序列。
     if replay(body.source, body.target, rows) != body.target:
         raise HTTPException(status_code=500, detail="ALIGNMENT_REPLAY_FAILED")
+
+    # 分块重放自检：一块不选必须精确等于 source，全部选中必须精确等于 target；
+    # 块编号与源/目标跨度由对齐稳定确定（见 app/blocks.py）。
+    blocks = split_blocks(rows, len(body.source), len(body.target))
+    if mixed_replay(body.source, body.target, rows, frozenset(), blocks) != body.source:
+        raise HTTPException(status_code=500, detail="MIXED_REPLAY_SOURCE_FAILED")
+    all_ids = frozenset(blk.id for blk in blocks)
+    if mixed_replay(body.source, body.target, rows, all_ids, blocks) != body.target:
+        raise HTTPException(status_code=500, detail="MIXED_REPLAY_TARGET_FAILED")
 
     return DiffResponse(
         distance=distance,

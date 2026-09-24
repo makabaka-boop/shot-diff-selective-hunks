@@ -176,3 +176,105 @@ td {
 .op-insert td:first-child + td {
   color: #1d4ed8;
 }
+
+.mixer {
+  background: #fff;
+  border: 1px solid #dfe3ea;
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 18px;
+}
+
+.mixer h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+
+.mixer h3 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.mixer-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.mixer-actions button,
+.mixed-head button {
+  padding: 6px 12px;
+  border: 1px solid #cdd3dc;
+  background: #f8fafc;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.blocks {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.block {
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.block label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.block-id {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.block-desc {
+  color: #374151;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mixed,
+.remaining {
+  border-top: 1px solid #eef0f3;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.mixed-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mixed-seq {
+  background: #f5f6f8;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  min-height: 20px;
+  word-break: break-all;
+}
+
+.remaining-error {
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.stale {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
